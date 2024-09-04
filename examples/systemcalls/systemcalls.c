@@ -1,4 +1,15 @@
 #include "systemcalls.h"
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <syslog.h>
+#include <errno.h>
+#include <string.h>
+#include <fcntl.h>
+
+#define __OPEN_LOG(__str__)         openlog((__str__), 0, LOG_USER)
+#define __CLOSE_LOG()               closelog()
 
 /**
  * @param cmd the command to execute with system()
@@ -16,8 +27,33 @@ bool do_system(const char *cmd)
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
+    bool result = false;
 
-    return true;
+    if (cmd == NULL)
+        return result;
+    
+    __OPEN_LOG(NULL);
+
+    int ret = system(cmd);
+
+    if (ret == 0) {
+        syslog(LOG_DEBUG, "Command \"%s\" executed succesfully", cmd);
+        result = true;
+
+    } else if (ret == -1) {
+        syslog(LOG_DEBUG, "Error: Child process could not be created. Errno %d ( %s )", errno, strerror(errno));
+    
+    } else if (WIFEXITED(ret) && WEXITSTATUS(ret)) {
+        syslog(LOG_DEBUG, "Error: Error executing command \"%s\". Errno %d ( %s )", cmd, errno, strerror(errno));
+    
+    } else if (WIFSIGNALED(ret)) {
+        syslog(LOG_DEBUG, "Error: Error command \"%s\" exit for a signal ( %d )", cmd, WTERMSIG (ret));
+    
+    }
+    
+    __CLOSE_LOG();
+
+    return result;
 }
 
 /**
@@ -36,6 +72,8 @@ bool do_system(const char *cmd)
 
 bool do_exec(int count, ...)
 {
+    bool result = false;
+    int status;
     va_list args;
     va_start(args, count);
     char * command[count+1];
@@ -45,10 +83,8 @@ bool do_exec(int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
 
+    va_end(args);
 /*
  * TODO:
  *   Execute a system command by calling fork, execv(),
@@ -58,11 +94,44 @@ bool do_exec(int count, ...)
  *   as second argument to the execv() command.
  *
 */
+    __OPEN_LOG(NULL);
 
-    va_end(args);
+    pid_t pid = fork();
 
-    return true;
+    if (pid == -1) {
+        syslog(LOG_DEBUG, "Error: Fork failed");
+    
+    } else if (pid == 0) {
+        // Child process
+        execv(command[0], command);
+
+        // this code is only executed if execv fails
+        syslog(LOG_DEBUG, "Error: Child execv command failed");
+        __CLOSE_LOG();
+        exit (EXIT_FAILURE);
+
+    } else {
+        // Parent process
+
+        // wait for the child process to complete
+        if (waitpid(pid, &status, 0) == -1) {
+            // waitpid failed
+            syslog(LOG_DEBUG, "Error: Waitpid in Parent process failed");
+
+        } else if (WIFEXITED(status)) {
+            // Result = true if process doesn't exit by a signal
+            result = (WEXITSTATUS (status) == 0);
+
+            syslog(LOG_DEBUG, "Child process exit status %d", WIFEXITED(status));
+        }
+    }
+
+    __CLOSE_LOG();
+
+    return result;
 }
+
+
 
 /**
 * @param outputfile - The full path to the file to write with command output.
@@ -71,6 +140,8 @@ bool do_exec(int count, ...)
 */
 bool do_exec_redirect(const char *outputfile, int count, ...)
 {
+    bool result = false;
+    int status;
     va_list args;
     va_start(args, count);
     char * command[count+1];
@@ -80,10 +151,8 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
 
+    va_end(args);
 
 /*
  * TODO
@@ -92,8 +161,52 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+    __OPEN_LOG(NULL);
 
-    va_end(args);
+    int fd = open(outputfile, O_RDWR|O_TRUNC|O_CREAT, 0666);
+    if (fd < 0) {
+        syslog(LOG_DEBUG, "Error: Creating file %s", outputfile);
+        
+    } else {
 
-    return true;
+        pid_t pid = fork();
+
+        if (pid == -1) {
+            syslog(LOG_DEBUG, "Error: Fork failed");
+        
+        } else if (pid == 0) {
+            // Child process
+
+            if (dup2(fd, 1) < 0) {
+                perror("dup2"); abort();
+            
+            } else {
+                close(fd);
+                execv(command[0], command);
+                
+                // this code is only executed if execv fails
+                syslog(LOG_DEBUG, "Error: Child execv command failed");
+                __CLOSE_LOG();
+                exit (EXIT_FAILURE);
+            }
+
+        } else if (pid > 0) {
+            // Parent process
+
+            // wait for the child process to complete
+            if (waitpid(pid, &status, 0) == -1) {
+                syslog(LOG_DEBUG, "Error: Waitpid in Parent process failed");
+
+            } else if (WIFEXITED(status)) {
+                // Result = true if process doesn't exit by a signal
+                result = (WEXITSTATUS (status) == 0);
+
+                syslog(LOG_DEBUG, "Child process exit status %d", WIFEXITED(status));
+            }
+
+            close(fd);
+        }
+    }
+
+    return result;
 }
