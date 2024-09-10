@@ -36,6 +36,7 @@ clean:
 	@rm -f $(BIN_DIR)/$(TARGET)
 	@echo Done!
 
+all: $(EXECUTABLE_FILES)
 
 $(EXECUTABLE_FILES): $(OBJECT_FILES)
 	@echo Generating $@
