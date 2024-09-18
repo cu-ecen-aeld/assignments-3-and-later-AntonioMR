@@ -91,7 +91,6 @@ int main (int argc, char **argv)
             run_as_daemon = true;
             printf("Server will run as Deamon!\n");
             break;
-        default:
         }
     }
 
@@ -194,7 +193,7 @@ int main (int argc, char **argv)
     fclose(file_h);
     INFO_LOG("File \"%s\" closed", ASSIGNMENT_OUTPUT_FILE);
     freeaddrinfo(servinfo);
-    INFO_LOG("Free servinfo. Total %ld bytes", sizeof(struct addrinfo));
+    INFO_LOG("Free servinfo. Total %d bytes", (int)(sizeof(struct addrinfo)));
     DEINIT_LOG();
     remove(ASSIGNMENT_OUTPUT_FILE);
 
@@ -350,7 +349,7 @@ static void secure_exit(int code)
     // free servinfo memory
     if (servinfo != NULL) {
         freeaddrinfo(servinfo);
-        INFO_LOG("Free servinfo. Total %ld bytes", sizeof(struct addrinfo));
+        INFO_LOG("Free servinfo. Total %d bytes", (int)(sizeof(struct addrinfo)));
     }
 
     // close log file
