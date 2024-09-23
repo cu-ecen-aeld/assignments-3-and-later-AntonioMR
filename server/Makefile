@@ -1,5 +1,5 @@
 # Compiler target
-TARGET	= aesdsocket
+TARGET	?= aesdsocket
 
 # Folders
 SRC_DIR		= .
@@ -8,17 +8,17 @@ OBJ_DIR		= ./obj
 BIN_DIR		= .
 
 # Preprocessor DEFINITIONS
-CDEFS	= 
+CDEFS	?= 
 # Compiler Flags
-CFLAGS	= -O3 -g -Wall -Werror
+CFLAGS	?= -O3 -g -Wall -Werror
 # Linker Flags
-LDFLAGS	= 
+LDFLAGS	?= -lpthread -lrt
 # Compiler
-CROSS_COMPILE = 
-CC		= $(CROSS_COMPILE)gcc
+CROSS_COMPILE ?= 
+CC		?= $(CROSS_COMPILE)gcc
 
 # Headers routes
-INCLUDES = $(INC_DIR)
+INCLUDES ?= $(INC_DIR)
 
 # Files
 SOURCE_FILES	= aesdsocket.c
@@ -39,7 +39,7 @@ clean:
 $(EXECUTABLE_FILES): $(OBJECT_FILES)
 	@echo Generating $@
 	@mkdir -p $(BIN_DIR)
-	$(CC) $(LDFLAGS) -o $@ $^
+	$(CC) -o $@ $^ $(LDFLAGS)
 	@echo "Build successful!"
 
 $(OBJECT_FILES): $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(INCLUDES) 
