@@ -34,11 +34,14 @@
 /**** Preprocessor Constants *************************************************/
 #define LISTENING_PORT                  "9000"  // Port the aplication is listening for
 #define MAX_INCOMING_QUEUE_CONN         10      // number of connections allowed on the incoming queue
-#define ASSIGNMENT_OUTPUT_FILE          "/var/tmp/aesdsocketdata"
 #define ASSIGNMENT_LOG_DESCRIPTION      "AESD_SOCKET"
 #define ASSIGNMENT_BUFFER_SIZE          1024
 #define LOG_INTERVAL_SECONDS            10
-
+#if USE_AESD_CHAR_DEVICE
+#define     ASSIGNMENT_OUTPUT_FILE      "/dev/aesdchar"
+#else
+#define     ASSIGNMENT_OUTPUT_FILE      "/var/tmp/aesdsocketdata"
+#endif
 
 /**** Preprocessor Macros ****************************************************/
 #define INIT_LOG(_ident_)               openlog((_ident_), 0, LOG_USER)
@@ -51,10 +54,12 @@
 /**** Types Definitions *******************************************************/
 typedef void  (*signal_handler_cb) (int signal_number);
 
+#if !USE_AESD_CHAR_DEVICE
 struct timer_thread_data_s {
     pthread_mutex_t            *mutex;
     FILE                       *file_h;
 };
+#endif
 
 struct client_thread_data_s {
     int                         socket;
@@ -62,7 +67,9 @@ struct client_thread_data_s {
     socklen_t                   client_len;
     char                       *buffer;
     pthread_mutex_t            *mutex;
+#if !USE_AESD_CHAR_DEVICE
     FILE                       *file_h;
+#endif
    // bool                        complete;
 };
 
@@ -78,7 +85,11 @@ struct list_thread_s {
 
 
 /**** Variable Definitions ***************************************************/
+#if USE_AESD_CHAR_DEVICE
+static int fd;                  // Driver file descriptor
+#else
 static FILE * file_h = NULL;
+#endif
 static volatile bool keep_running = true;
 static pthread_mutex_t file_mutex;
 static bool file_mutex_init = false;
@@ -91,11 +102,13 @@ static void signal_handler(int signal_number);
 static void secure_exit(int code);
 
 static int set_signals_handler(signal_handler_cb handler);
+#if !USE_AESD_CHAR_DEVICE
 static int init_log_timer(timer_t *timer_id,FILE *file_h, pthread_mutex_t *mutex);
+static void log_timer_thread (union sigval sigval);
+#endif
 static int make_daemon(void);
 static int configure_socket_server(int *server_fd);
 static void* client_thread_func(void *thread_param);
-static void log_timer_thread (union sigval sigval);
 
 /**** Functions Definitions **************************************************/
 
@@ -112,8 +125,10 @@ int main (int argc, char **argv)
     bool    run_as_daemon = false;
     int     server_fd = 0;
     struct  list_thread_s *client_list_thread;
+#if !USE_AESD_CHAR_DEVICE
     timer_t timer_id;
-    
+#endif
+
     // Obtain parameters
     while ((opt = getopt(argc, argv, "d")) != -1) {
         switch (opt) {
@@ -149,6 +164,8 @@ int main (int argc, char **argv)
         secure_exit(-1);
     }
 
+
+#if !USE_AESD_CHAR_DEVICE
     // Open the output file for read/write. Create if not exists
     file_h = fopen(ASSIGNMENT_OUTPUT_FILE, "w+");
     if (file_h == NULL) {
@@ -157,6 +174,7 @@ int main (int argc, char **argv)
     } else {
         INFO_LOG("File %s open successfully", ASSIGNMENT_OUTPUT_FILE);
     }
+#endif
 
     // Initialize file access mutex
     if (pthread_mutex_init(&file_mutex, NULL) != 0) {
@@ -166,11 +184,13 @@ int main (int argc, char **argv)
         file_mutex_init = true;
     }
 
+#if !USE_AESD_CHAR_DEVICE
     // Initialize log timer
     if (init_log_timer(&timer_id, file_h, &file_mutex) != 0) {
         ERROR_LOG("Periodic log timer setup");
         secure_exit(-1);
     }
+#endif
 
     LIST_INIT(&client_list_head);
 
@@ -202,7 +222,9 @@ int main (int argc, char **argv)
         }
 
         client_list_thread->data->mutex    = &file_mutex;
+#if !USE_AESD_CHAR_DEVICE
         client_list_thread->data->file_h   = file_h;
+#endif
         //client_list_thread->data->complete = false;
 
         int thread_ret = pthread_create (&client_list_thread->thread, NULL, client_thread_func, client_list_thread->data);
@@ -233,12 +255,14 @@ int main (int argc, char **argv)
         client_list_thread = next;
     }
 
+#if !USE_AESD_CHAR_DEVICE
     fclose(file_h);
     INFO_LOG("File \"%s\" closed", ASSIGNMENT_OUTPUT_FILE);
     timer_delete(timer_id);
+    remove(ASSIGNMENT_OUTPUT_FILE);
+#endif
     close(server_fd);
     DEINIT_LOG();
-    remove(ASSIGNMENT_OUTPUT_FILE);
 
     return EXIT_SUCCESS;
 }
@@ -269,6 +293,7 @@ static int set_signals_handler(signal_handler_cb handler)
 }
 
 
+#if !USE_AESD_CHAR_DEVICE
 static int init_log_timer(timer_t *timer_id, FILE *file_h, pthread_mutex_t *mutex)
 {
     // Declarar el temporizador y la estructura de tiempo
@@ -309,6 +334,46 @@ static int init_log_timer(timer_t *timer_id, FILE *file_h, pthread_mutex_t *mute
 
     return EXIT_SUCCESS;
 }
+
+
+
+static void log_timer_thread (union sigval sigval)
+{
+    time_t                       now;
+    struct  tm                  *now_tm;
+    struct  timer_thread_data_s *timer_data = (struct timer_thread_data_s*)sigval.sival_ptr;
+    char    buffer[50] = {0};
+    size_t  timestamp_len = 0;
+
+    now = time(NULL);
+    now_tm = localtime(&now);
+    if (now_tm == NULL) {
+        ERROR_LOG("Getting local time");
+        return;
+    }
+
+    timestamp_len = strftime(buffer, sizeof(buffer), "timestamp:%a, %d %b %Y %T %z\n", now_tm);
+    if (timestamp_len == 0) {
+        ERROR_LOG("Formatting timestamp");
+        return;
+    }
+
+    if (pthread_mutex_lock (timer_data->mutex) != 0) {
+        ERROR_LOG("Periodic Log Lock file access failed");
+        return;
+    }
+
+    if (fwrite(buffer, sizeof(char), timestamp_len, timer_data->file_h) != timestamp_len) {
+        ERROR_LOG("Writting timestamp to file");
+    }
+
+
+    if (pthread_mutex_unlock (timer_data->mutex) != 0){
+        ERROR_LOG("Periodic Log Unlock file access failed");
+        return;
+    }
+}
+#endif
 
 
 /**
@@ -436,6 +501,9 @@ static void* client_thread_func(void *thread_param)
     struct  client_thread_data_s *client_data = (struct client_thread_data_s*)thread_param;
     int     rw_bytes = 0;
     char    client_ip[INET_ADDRSTRLEN];
+#if USE_AESD_CHAR_DEVICE
+    int     fd;
+#endif
 
     if (thread_param == NULL) {
         ERROR_LOG("Invalid parameter reference received in thread function");
@@ -444,15 +512,15 @@ static void* client_thread_func(void *thread_param)
     
     if (client_data->mutex == NULL) {
         ERROR_LOG("Invalid mutex reference received in thread function");
-        close(client_data->socket);
-        return NULL;
+        goto err_free_socket;
     }
 
+#if !USE_AESD_CHAR_DEVICE
     if (client_data->file_h == NULL) {
         ERROR_LOG("Invalid file reference received in thread function");
-        close(client_data->socket);
-        return NULL;
+        goto err_free_socket;
     }
+#endif
        
     // Obtain client IP address
     inet_ntop(AF_INET, &client_data->address.sin_addr, client_ip, INET_ADDRSTRLEN);
@@ -461,18 +529,25 @@ static void* client_thread_func(void *thread_param)
     client_data->buffer = malloc(ASSIGNMENT_BUFFER_SIZE);
     if (!client_data->buffer) {
         ERROR_LOG("Thread Read/Write Buffer allocation failed");
-        close(client_data->socket);
-        return NULL;
+        goto err_free_socket;
     }
 
     memset(client_data->buffer, 0x00, ASSIGNMENT_BUFFER_SIZE);
 
+#if !USE_AESD_CHAR_DEVICE
     if (pthread_mutex_lock (client_data->mutex) != 0) {
         ERROR_LOG("Client Lock file access failed");
-        free(client_data->buffer);
-        close(client_data->socket);
-        return NULL;
+        goto err_free_memory;
     }
+#endif
+
+#if USE_AESD_CHAR_DEVICE
+    fd = open(ASSIGNMENT_OUTPUT_FILE, O_RDWR);
+    if (fd == -1) {
+        ERROR_LOG("Client Open file failed");
+        goto err_free_resources;
+    }
+#endif
 
     // Receive data from client until new line character or exit signal is received
     while (keep_running) {
@@ -487,7 +562,11 @@ static void* client_thread_func(void *thread_param)
         } else if(rw_bytes == 0) {
             break;
         
+#if USE_AESD_CHAR_DEVICE
+        } else if (write(fd, client_data->buffer, rw_bytes) != rw_bytes) {
+#else
         } else if (fwrite(client_data->buffer, sizeof(char), rw_bytes, client_data->file_h) != rw_bytes) {
+#endif
             ERROR_LOG("Writting data to file: %s", strerror(errno));
             break;
 
@@ -501,13 +580,19 @@ static void* client_thread_func(void *thread_param)
 
     if (keep_running) {
 
+#if !USE_AESD_CHAR_DEVICE
         // Move the access pointer to the begining of the file
         fseek(client_data->file_h, 0, SEEK_SET);
+#endif
 
         // Read the file content and send to the client
         while (keep_running) {
 
+#if USE_AESD_CHAR_DEVICE
+            rw_bytes = read(fd, client_data->buffer, ASSIGNMENT_BUFFER_SIZE-1);
+#else
             rw_bytes = fread(client_data->buffer, sizeof(char), ASSIGNMENT_BUFFER_SIZE-1, client_data->file_h);
+#endif
             if (rw_bytes == 0) {
                 break;  // End of the file reached
 
@@ -519,49 +604,19 @@ static void* client_thread_func(void *thread_param)
         }
     }
 
+#if USE_AESD_CHAR_DEVICE
+    close(fd);
+err_free_resources:
+#endif
+#if !USE_AESD_CHAR_DEVICE
     pthread_mutex_unlock (client_data->mutex);
-    close(client_data->socket);
+err_free_memory:
+#endif
     free(client_data->buffer);
+err_free_socket:
+    close(client_data->socket);
 
     return NULL;
-}
-
-
-static void log_timer_thread (union sigval sigval)
-{
-    time_t                       now;
-    struct  tm                  *now_tm;
-    struct  timer_thread_data_s *timer_data = (struct timer_thread_data_s*)sigval.sival_ptr;
-    char    buffer[50] = {0};
-    size_t  timestamp_len = 0;
-
-    now = time(NULL);
-    now_tm = localtime(&now);
-    if (now_tm == NULL) {
-        ERROR_LOG("Getting local time");
-        return;
-    }
-
-    timestamp_len = strftime(buffer, sizeof(buffer), "timestamp:%a, %d %b %Y %T %z\n", now_tm);
-    if (timestamp_len == 0) {
-        ERROR_LOG("Formatting timestamp");
-        return;
-    }
-
-    if (pthread_mutex_lock (timer_data->mutex) != 0) {
-        ERROR_LOG("Periodic Log Lock file access failed");
-        return;
-    }
-
-    if (fwrite(buffer, sizeof(char), timestamp_len, timer_data->file_h) != timestamp_len) {
-        ERROR_LOG("Writting timestamp to file");
-    }
-
-
-    if (pthread_mutex_unlock (timer_data->mutex) != 0){
-        ERROR_LOG("Periodic Log Unlock file access failed");
-        return;
-    }
 }
 
 
@@ -587,11 +642,17 @@ static void signal_handler(int signal_number)
  */
 static void secure_exit(int code)
 {
+
+#if USE_AESD_CHAR_DEVICE
+    // close outuput file
+    close(fd);
+#else
     // close outuput file
     if (file_h != NULL) {
         fclose(file_h);
         INFO_LOG("File \"%s\" closed", ASSIGNMENT_OUTPUT_FILE);
     }
+#endif
 
     if (file_mutex_init)
         pthread_mutex_destroy(&file_mutex);

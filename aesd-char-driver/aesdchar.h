@@ -23,12 +23,32 @@
 #  define PDEBUG(fmt, args...) /* not debugging: nothing */
 #endif
 
+#  ifdef __KERNEL__
+     /* This one if debugging is on, and kernel space */
+#    define PWARNING(fmt, args...) printk( KERN_WARNING "aesdchar: " fmt, ## args)
+#    define PERROR(fmt, args...)   printk( KERN_WARNING "aesdchar: " fmt, ## args)
+#  else
+     /* This one for user space */
+#    define PWARNING(fmt, args...) fprintf(stderr, fmt, ## args)
+#    define PERROR(fmt, args...)   fprintf(stderr, fmt, ## args)
+#  endif
+
+
+struct tmp_buffer_s
+{
+     char *buffer;
+     int data_size;
+};
+
 struct aesd_dev
 {
     /**
      * TODO: Add structure(s) and locks needed to complete assignment requirements
      */
-    struct cdev cdev;     /* Char device structure      */
+    struct tmp_buffer_s tmp_buffer;
+    struct aesd_circular_buffer *circular_buffer;
+    struct mutex lock;   /* mutual exclusion semaphore     */
+    struct cdev cdev;    /* Char device structure      */
 };
 
 

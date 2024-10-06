@@ -14,6 +14,7 @@
 #include <string.h>
 #endif
 
+//#include <errno-base.h>
 #include "aesd-circular-buffer.h"
 
 /**
@@ -32,32 +33,19 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
     struct aesd_buffer_entry *buffer_entry_rtn = NULL;
     
     if ((buffer != NULL) && (entry_offset_byte_rtn != NULL)) {
-        int buffer_entry = buffer->out_offs;
-        bool full = buffer->full;
-        bool found = false;
 
-        while (!found) {
-            
-            // Check end of the circular buffer
-            if ((buffer_entry == buffer->in_offs) && (!full))
-                return NULL;
+        struct list_buffer_entry_s *list_entry;
+        list_for_each_entry(list_entry, &buffer->list_head, entries) {
 
-            if (buffer->entry[buffer_entry].size > char_offset) {
-                found = true;
+            if (list_entry->entry.size > char_offset) {
+                buffer_entry_rtn = &list_entry->entry;
+                *entry_offset_byte_rtn = char_offset;
+                break;
 
             } else {
-                char_offset -= buffer->entry[buffer_entry].size;
-                buffer_entry++;
-
-                if (buffer_entry >= AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
-                    buffer_entry = 0;
-                
-                full = false;
+                char_offset -= list_entry->entry.size;
             }
         }
-
-        buffer_entry_rtn = &buffer->entry[buffer_entry];
-        *entry_offset_byte_rtn = char_offset;
     }
 
     return buffer_entry_rtn;
@@ -69,27 +57,49 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 * new start location.
 * Any necessary locking must be handled by the caller
 * Any memory referenced in @param add_entry must be allocated by and/or must have a lifetime managed by the caller.
+* @return pointer to the buffer that must be deallocated when circular buffer is full
+* NULL if circular buffer is no full.
 */
-void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
+const char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
-    if ((buffer == NULL) || (add_entry == 0))
-        return;
+    const char *ret_buffptr = NULL;
+    struct list_buffer_entry_s *new_entry = NULL;
 
-    if ((buffer->in_offs == buffer->out_offs) && (buffer->full))
-        buffer->out_offs++;
-    
-    buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
-    buffer->entry[buffer->in_offs].size = add_entry->size;
-    buffer->in_offs++;
+    if ((buffer == NULL) || (add_entry == NULL)){
+        CBERROR("NULL parameter received in buffer_init function\n");
+        return NULL;
+    }
 
-    if (buffer->in_offs >= AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
-        buffer->in_offs = 0;
-    
-    if (buffer->out_offs >= AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
-        buffer->out_offs = 0;
+    // if list has AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED elements remove header element
+    if (buffer->element_count == AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED) {
+        struct list_buffer_entry_s *first_entry = list_first_entry(&buffer->list_head, struct list_buffer_entry_s, entries);
+        ret_buffptr = first_entry->entry.buffptr;
+        CBDEBUG("buffer with size %d, unlink from circular buffer. Sent to free by caller\n", (int)first_entry->entry.size);
+        list_del(&first_entry->entries);
+        kfree(first_entry);
+        CBDEBUG("deallocated %d bytes from list element entry\n", (int)sizeof(struct list_buffer_entry_s));
+        buffer->element_count--;
+    }
 
-    if (buffer->in_offs == buffer->out_offs)
-        buffer->full = true;
+    // insert the new element at the tail
+    new_entry = kmalloc(sizeof(struct list_buffer_entry_s), GFP_KERNEL);
+    if (new_entry != NULL) {
+        CBDEBUG("allocated %d bytes for list element entry\n", (int)sizeof(struct list_buffer_entry_s));
+        new_entry->entry.buffptr = add_entry->buffptr;
+        new_entry->entry.size = add_entry->size;
+        list_add_tail(&new_entry->entries, &buffer->list_head);
+        buffer->element_count++;
+
+        CBDEBUG("buffer with size %d, link to circular buffer tail. buffer size: %d\n", \
+                                        (int)new_entry->entry.size, \
+                                        (int)buffer->element_count);
+
+    } else {
+        CBERROR("Unable to allocate memory for new list element entry\n");
+        return NULL;  // Error de asignación de memoria
+    }
+
+    return ret_buffptr;
 }
 
 /**
@@ -97,5 +107,16 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
 */
 void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer)
 {
-    memset(buffer,0,sizeof(struct aesd_circular_buffer));
+    if (buffer == NULL){
+        CBERROR("NULL parameter received in buffer_init function\n");
+        return;
+    }
+
+    // Init list head
+    INIT_LIST_HEAD(&buffer->list_head);
+    
+    // Initial state list empty
+    buffer->element_count = 0;
+
+    CBDEBUG("Buffer init. Elements cnt %d\n", buffer->element_count);
 }

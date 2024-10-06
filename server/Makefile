@@ -7,8 +7,12 @@ INC_DIR		= .
 OBJ_DIR		= ./obj
 BIN_DIR		= .
 
+
+# USE_AESD_CHAR_DEVICE default definition
+USE_AESD_CHAR_DEVICE ?= 1
+
 # Preprocessor DEFINITIONS
-CDEFS	?= 
+CDEFS	?= USE_AESD_CHAR_DEVICE=$(USE_AESD_CHAR_DEVICE)
 # Compiler Flags
 CFLAGS	?= -O3 -g -Wall -Werror
 # Linker Flags
@@ -45,4 +49,4 @@ $(EXECUTABLE_FILES): $(OBJECT_FILES)
 $(OBJECT_FILES): $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(INCLUDES) 
 	@echo Compiling $<
 	@mkdir -p $(@D)
-	$(CC) $(CFLAGS) $(INCLUDES:%=-I %) -o $@ -c $< 
+	$(CC) $(CFLAGS) -D $(CDEFS) $(INCLUDES:%=-I %) -o $@ -c $< 

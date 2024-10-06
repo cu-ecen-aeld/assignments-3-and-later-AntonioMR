@@ -10,11 +10,38 @@
 
 #ifdef __KERNEL__
 #include <linux/types.h>
+#include <linux/list.h>
+#include <linux/slab.h>
 #else
 #include <stddef.h> // size_t
 #include <stdint.h> // uintx_t
 #include <stdbool.h>
 #endif
+
+#define CIRCULAR_BUFFER_DEBUG 1  //Remove comment on this line to enable debug
+
+#undef CBDEBUG             /* undef it, just in case */
+#ifdef CIRCULAR_BUFFER_DEBUG
+#  ifdef __KERNEL__
+     /* This one if debugging is on, and kernel space */
+#    define CBDEBUG(fmt, args...) printk( KERN_DEBUG "circular_buffer: " fmt, ## args)
+#  else
+     /* This one for user space */
+#    define CBDEBUG(fmt, args...) fprintf(stderr, fmt, ## args)
+#  endif
+#else
+#  define CBDEBUG(fmt, args...) /* not debugging: nothing */
+#endif
+
+#  ifdef __KERNEL__
+     /* This one if debugging is on, and kernel space */
+#    define CBWARNING(fmt, args...) printk( KERN_WARNING "circular_buffer: " fmt, ## args)
+#    define CBERROR(fmt, args...)   printk( KERN_WARNING "circular_buffer: " fmt, ## args)
+#  else
+     /* This one for user space */
+#    define CBWARNING(fmt, args...) fprintf(stderr, fmt, ## args)
+#    define CBERROR(fmt, args...)   fprintf(stderr, fmt, ## args)
+#  endif
 
 #define AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED 10
 
@@ -30,31 +57,28 @@ struct aesd_buffer_entry
     size_t size;
 };
 
+struct list_buffer_entry_s {
+
+    struct aesd_buffer_entry entry;
+    struct list_head entries;
+};
+
 struct aesd_circular_buffer
 {
     /**
-     * An array of pointers to memory allocated for the most recent write operations
+     * Head of the buffer list
      */
-    struct aesd_buffer_entry  entry[AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED];
+    struct list_head list_head;
     /**
-     * The current location in the entry structure where the next write should
-     * be stored.
+     * Number of elements in the buffer list.
      */
-    uint8_t in_offs;
-    /**
-     * The first location in the entry structure to read from
-     */
-    uint8_t out_offs;
-    /**
-     * set to true when the buffer entry structure is full
-     */
-    bool full;
+    uint8_t element_count;
 };
 
 extern struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct aesd_circular_buffer *buffer,
             size_t char_offset, size_t *entry_offset_byte_rtn );
 
-extern void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry);
+extern const char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry);
 
 extern void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer);
 
@@ -72,11 +96,12 @@ extern void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer);
  *      free(entry->buffptr);
  * }
  */
+/*
 #define AESD_CIRCULAR_BUFFER_FOREACH(entryptr,buffer,index) \
     for(index=0, entryptr=&((buffer)->entry[index]); \
             index<AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; \
             index++, entryptr=&((buffer)->entry[index]))
-
+*/
 
 
 #endif /* AESD_CIRCULAR_BUFFER_H */
