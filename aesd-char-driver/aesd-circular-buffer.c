@@ -12,6 +12,15 @@
 #include <linux/string.h>
 #else
 #include <string.h>
+#include <stdlib.h>
+#endif
+
+#ifdef __KERNEL__
+    #define my_alloc(size)  kmalloc(size, GFP_KERNEL)
+    #define my_free(ptr)    kfree(ptr)
+#else
+    #define my_alloc(size)  malloc(size)
+    #define my_free(ptr)    free(ptr)
 #endif
 
 //#include <errno-base.h>
@@ -76,13 +85,13 @@ const char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, 
         ret_buffptr = first_entry->entry.buffptr;
         CBDEBUG("buffer with size %d, unlink from circular buffer. Sent to free by caller\n", (int)first_entry->entry.size);
         list_del(&first_entry->entries);
-        kfree(first_entry);
+        my_free(first_entry);
         CBDEBUG("deallocated %d bytes from list element entry\n", (int)sizeof(struct list_buffer_entry_s));
         buffer->element_count--;
     }
 
     // insert the new element at the tail
-    new_entry = kmalloc(sizeof(struct list_buffer_entry_s), GFP_KERNEL);
+    new_entry = my_alloc(sizeof(struct list_buffer_entry_s));
     if (new_entry != NULL) {
         CBDEBUG("allocated %d bytes for list element entry\n", (int)sizeof(struct list_buffer_entry_s));
         new_entry->entry.buffptr = add_entry->buffptr;

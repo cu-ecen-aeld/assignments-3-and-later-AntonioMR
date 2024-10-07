@@ -16,6 +16,8 @@
 #include <stddef.h> // size_t
 #include <stdint.h> // uintx_t
 #include <stdbool.h>
+#include <stdio.h>
+#include "my_list.h"
 #endif
 
 #define CIRCULAR_BUFFER_DEBUG 1  //Remove comment on this line to enable debug
