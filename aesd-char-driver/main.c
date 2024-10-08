@@ -44,9 +44,9 @@ void aesd_cleanup_module(void);
 
 int aesd_open(struct inode *inode, struct file *filp)
 {
-    PDEBUG("open");
-    /* device information */
 	struct aesd_dev *dev;
+
+    PDEBUG("open");
 
 	dev = container_of(inode->i_cdev, struct aesd_dev, cdev);
 	filp->private_data = dev; /* for other methods */
