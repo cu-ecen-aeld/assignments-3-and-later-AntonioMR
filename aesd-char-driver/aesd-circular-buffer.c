@@ -83,7 +83,10 @@ const char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, 
     if (buffer->element_count == AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED) {
         struct list_buffer_entry_s *first_entry = list_first_entry(&buffer->list_head, struct list_buffer_entry_s, entries);
         ret_buffptr = first_entry->entry.buffptr;
-        CBDEBUG("buffer with size %d, unlink from circular buffer. Sent to free by caller\n", (int)first_entry->entry.size);
+        buffer->size -= first_entry->entry.size;
+        CBDEBUG("buffer with size %d, unlink from circular buffer. Sent to free by caller. Total buffer size: %d characters\n",\
+                                                (int)first_entry->entry.size, \
+                                                (int)buffer->size);
         list_del(&first_entry->entries);
         my_free(first_entry);
         CBDEBUG("deallocated %d bytes from list element entry\n", (int)sizeof(struct list_buffer_entry_s));
@@ -97,10 +100,12 @@ const char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, 
         new_entry->entry.buffptr = add_entry->buffptr;
         new_entry->entry.size = add_entry->size;
         list_add_tail(&new_entry->entries, &buffer->list_head);
+        buffer->size += add_entry->size;
         buffer->element_count++;
 
-        CBDEBUG("buffer with size %d, link to circular buffer tail. buffer size: %d\n", \
+        CBDEBUG("buffer with size %d, link to circular buffer tail. buffer size: %d characters in %d elements\n", \
                                         (int)new_entry->entry.size, \
+                                        (int)buffer->size, \
                                         (int)buffer->element_count);
 
     } else {
@@ -126,6 +131,6 @@ void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer)
     
     // Initial state list empty
     buffer->element_count = 0;
-
+    buffer->size = 0;
     CBDEBUG("Buffer init. Elements cnt %d\n", buffer->element_count);
 }

@@ -75,6 +75,10 @@ struct aesd_circular_buffer
      * Number of elements in the buffer list.
      */
     uint8_t element_count;
+    /**
+     * Number of characters in all the buffer entries.
+     */
+    size_t size;
 };
 
 extern struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct aesd_circular_buffer *buffer,

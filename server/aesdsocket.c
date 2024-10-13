@@ -30,6 +30,9 @@
 #include <time.h>
 #include <unistd.h>
 
+#if USE_AESD_CHAR_DEVICE
+#include "../aesd-char-driver/aesd_ioctl.h"
+#endif
 
 /**** Preprocessor Constants *************************************************/
 #define LISTENING_PORT                  "9000"  // Port the aplication is listening for
@@ -39,6 +42,8 @@
 #define LOG_INTERVAL_SECONDS            10
 #if USE_AESD_CHAR_DEVICE
 #define     ASSIGNMENT_OUTPUT_FILE      "/dev/aesdchar"
+#define     AESDCHAR_IOCSEEDTO_CMD      "AESDCHAR_IOCSEEKTO:"
+#define     AESDCHAR_IOCSEEDTO_CMD_SIZE 19
 #else
 #define     ASSIGNMENT_OUTPUT_FILE      "/var/tmp/aesdsocketdata"
 #endif
@@ -563,6 +568,23 @@ static void* client_thread_func(void *thread_param)
             break;
         
 #if USE_AESD_CHAR_DEVICE
+        } else if (strncmp(client_data->buffer, AESDCHAR_IOCSEEDTO_CMD, AESDCHAR_IOCSEEDTO_CMD_SIZE) == 0) {
+            
+            INFO_LOG("ioctl AESDCHAR_IOCSEEKTO request received\n");
+            struct aesd_seekto seekto;
+            if (sscanf(client_data->buffer, "AESDCHAR_IOCSEEKTO:%u,%u", &seekto.write_cmd, &seekto.write_cmd_offset) == 2) {
+                if (ioctl(fd, AESDCHAR_IOCSEEKTO, &seekto) != 0) {
+                    ERROR_LOG("Send ioctl AESDCHAR_IOCSEEKTO failed: %s", strerror(errno));
+                    break;
+                }
+                INFO_LOG("                                          cmd: %d, offset: %d", seekto.write_cmd, seekto.write_cmd_offset);
+                goto read;
+                
+            } else {
+                ERROR_LOG("parse ioctl AESDCHAR_IOCSEEKTO failed");
+                break;
+            }
+
         } else if (write(fd, client_data->buffer, rw_bytes) != rw_bytes) {
 #else
         } else if (fwrite(client_data->buffer, sizeof(char), rw_bytes, client_data->file_h) != rw_bytes) {
@@ -580,11 +602,14 @@ static void* client_thread_func(void *thread_param)
 
     if (keep_running) {
 
-#if !USE_AESD_CHAR_DEVICE
-        // Move the access pointer to the begining of the file
+    // Move the access pointer to the begining of the file
+#if USE_AESD_CHAR_DEVICE
+        lseek(fd, 0, SEEK_SET);
+#else
         fseek(client_data->file_h, 0, SEEK_SET);
 #endif
 
+read:
         // Read the file content and send to the client
         while (keep_running) {
 

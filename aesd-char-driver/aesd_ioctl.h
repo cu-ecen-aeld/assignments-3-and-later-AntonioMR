@@ -33,14 +33,16 @@ struct aesd_seekto {
     uint32_t write_cmd_offset;
 };
 
+enum {
+    AESDCHAR_IOC_SEEKTO = 1,
+    AESDCHAR_IOC_MAXNR
+};
+
 // Pick an arbitrary unused value from https://github.com/torvalds/linux/blob/master/Documentation/userspace-api/ioctl/ioctl-number.rst
 #define AESD_IOC_MAGIC 0x16
 
 // Define a write command from the user point of view, use command number 1
-#define AESDCHAR_IOCSEEKTO _IOWR(AESD_IOC_MAGIC, 1, struct aesd_seekto)
-/**
- * The maximum number of commands supported, used for bounds checking
- */
-#define AESDCHAR_IOC_MAXNR 1
+#define AESDCHAR_IOCSEEKTO _IOWR(AESD_IOC_MAGIC, AESDCHAR_IOC_SEEKTO, struct aesd_seekto)
+
 
 #endif /* AESD_IOCTL_H */
